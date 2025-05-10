@@ -247,13 +247,13 @@ func processHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func applyEqualizer(src io.Reader, bass, mid, treble int) ([]byte, error) {
-	// We need to read the entire file into memory to work with it
+	// Read the entire source into memory
 	srcBytes, err := io.ReadAll(src)
 	if err != nil {
 		return nil, fmt.Errorf("error reading source: %v", err)
 	}
 
-	// Create a reader that implements io.ReadSeeker
+	// Create a ReadSeeker for the decoder
 	srcReader := bytes.NewReader(srcBytes)
 
 	// Decode the WAV file
@@ -275,15 +275,20 @@ func applyEqualizer(src io.Reader, bass, mid, treble int) ([]byte, error) {
 	// Apply equalization
 	applyBasicEQ(buf, bassFactor, midFactor, trebleFactor)
 
-	// Create a buffer to hold the output
-	var outBuf bytes.Buffer
+	// Create a temporary file for the encoder
+	tmpFile, err := os.CreateTemp("", "processed_*.wav")
+	if err != nil {
+		return nil, fmt.Errorf("error creating temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
 
-	// Create encoder - using WAVE_FORMAT_PCM (1) as the default format
-	encoder := wav.NewEncoder(&outBuf, 
-		buf.Format.SampleRate, 
-		int(decoder.BitDepth),  // Using decoder's bit depth
-		buf.Format.NumChannels, 
-		1) // Using PCM format
+	// Create encoder - using the temporary file as WriteSeeker
+	encoder := wav.NewEncoder(tmpFile,
+		buf.Format.SampleRate,
+		int(decoder.BitDepth),
+		buf.Format.NumChannels,
+		1) // WAVE_FORMAT_PCM
 
 	if err := encoder.Write(buf); err != nil {
 		return nil, fmt.Errorf("error encoding WAV: %v", err)
@@ -292,7 +297,18 @@ func applyEqualizer(src io.Reader, bass, mid, treble int) ([]byte, error) {
 		return nil, fmt.Errorf("error closing encoder: %v", err)
 	}
 
-	return outBuf.Bytes(), nil
+	// Read the processed data back from the temporary file
+	_, err = tmpFile.Seek(0, 0)
+	if err != nil {
+		return nil, fmt.Errorf("error seeking temp file: %v", err)
+	}
+
+	processedData, err := io.ReadAll(tmpFile)
+	if err != nil {
+		return nil, fmt.Errorf("error reading temp file: %v", err)
+	}
+
+	return processedData, nil
 }
 
 func applyBasicEQ(buf *audio.IntBuffer, bassFactor, midFactor, trebleFactor float64) {
