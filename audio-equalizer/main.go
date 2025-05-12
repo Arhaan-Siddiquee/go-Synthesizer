@@ -21,7 +21,6 @@ const (
 )
 
 func init() {
-	// Create directories if they don't exist
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		log.Fatal(err)
 	}
@@ -150,7 +149,6 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Limit upload size
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
 	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
 		http.Error(w, "File too large", http.StatusBadRequest)
@@ -164,7 +162,6 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Create the upload file
 	dstPath := filepath.Join(uploadDir, handler.Filename)
 	dst, err := os.Create(dstPath)
 	if err != nil {
@@ -173,13 +170,11 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer dst.Close()
 
-	// Copy the uploaded file to the destination
 	if _, err := io.Copy(dst, file); err != nil {
 		http.Error(w, "Error saving the file", http.StatusInternalServerError)
 		return
 	}
 
-	// Redirect back to the main page with the filename
 	http.Redirect(w, r, "/?file="+handler.Filename, http.StatusSeeOther)
 }
 
@@ -189,7 +184,6 @@ func processHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get form values
 	filename := r.FormValue("filename")
 	if filename == "" {
 		http.Error(w, "No filename provided", http.StatusBadRequest)
@@ -218,7 +212,6 @@ func processHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Open the original file
 	srcPath := filepath.Join(uploadDir, filename)
 	srcFile, err := os.Open(srcPath)
 	if err != nil {
@@ -227,14 +220,12 @@ func processHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer srcFile.Close()
 
-	// Process the audio
 	processedAudio, err := applyEqualizer(srcFile, bass, mid, treble)
 	if err != nil {
 		http.Error(w, "Error processing audio: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Save the processed file
 	processedPath := filepath.Join(processedDir, "processed_"+filename)
 	err = os.WriteFile(processedPath, processedAudio, 0644)
 	if err != nil {
@@ -242,21 +233,17 @@ func processHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Redirect back to the main page with the filename
 	http.Redirect(w, r, "/?file="+filename, http.StatusSeeOther)
 }
 
 func applyEqualizer(src io.Reader, bass, mid, treble int) ([]byte, error) {
-	// Read the entire source into memory
 	srcBytes, err := io.ReadAll(src)
 	if err != nil {
 		return nil, fmt.Errorf("error reading source: %v", err)
 	}
 
-	// Create a ReadSeeker for the decoder
 	srcReader := bytes.NewReader(srcBytes)
 
-	// Decode the WAV file
 	decoder := wav.NewDecoder(srcReader)
 	if !decoder.IsValidFile() {
 		return nil, fmt.Errorf("not a valid WAV file")
@@ -267,15 +254,12 @@ func applyEqualizer(src io.Reader, bass, mid, treble int) ([]byte, error) {
 		return nil, fmt.Errorf("error decoding WAV: %v", err)
 	}
 
-	// Convert factors to float64 (100% = 1.0)
 	bassFactor := float64(bass) / 100.0
 	midFactor := float64(mid) / 100.0
 	trebleFactor := float64(treble) / 100.0
 
-	// Apply equalization
 	applyBasicEQ(buf, bassFactor, midFactor, trebleFactor)
 
-	// Create a temporary file for the encoder
 	tmpFile, err := os.CreateTemp("", "processed_*.wav")
 	if err != nil {
 		return nil, fmt.Errorf("error creating temp file: %v", err)
@@ -283,12 +267,11 @@ func applyEqualizer(src io.Reader, bass, mid, treble int) ([]byte, error) {
 	defer os.Remove(tmpFile.Name())
 	defer tmpFile.Close()
 
-	// Create encoder - using the temporary file as WriteSeeker
 	encoder := wav.NewEncoder(tmpFile,
 		buf.Format.SampleRate,
 		int(decoder.BitDepth),
 		buf.Format.NumChannels,
-		1) // WAVE_FORMAT_PCM
+		1) 
 
 	if err := encoder.Write(buf); err != nil {
 		return nil, fmt.Errorf("error encoding WAV: %v", err)
@@ -297,7 +280,6 @@ func applyEqualizer(src io.Reader, bass, mid, treble int) ([]byte, error) {
 		return nil, fmt.Errorf("error closing encoder: %v", err)
 	}
 
-	// Read the processed data back from the temporary file
 	_, err = tmpFile.Seek(0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("error seeking temp file: %v", err)
@@ -312,7 +294,6 @@ func applyEqualizer(src io.Reader, bass, mid, treble int) ([]byte, error) {
 }
 
 func applyBasicEQ(buf *audio.IntBuffer, bassFactor, midFactor, trebleFactor float64) {
-	// Remove unused sampleRate parameter since we're not using it
 	numSamples := len(buf.Data)
 	numChannels := buf.Format.NumChannels
 
@@ -323,19 +304,14 @@ func applyBasicEQ(buf *audio.IntBuffer, bassFactor, midFactor, trebleFactor floa
 				continue
 			}
 
-			// Simple EQ implementation
 			original := float64(buf.Data[idx])
 			
-			// Apply frequency-based gains (simplified)
-			// In a real EQ, you would use proper filtering
 			bassSample := original * bassFactor
 			midSample := original * midFactor
 			trebleSample := original * trebleFactor
 			
-			// Combine (very simplistic approach)
 			combined := (bassSample + midSample + trebleSample) / 3
 			
-			// Clamp to 16-bit range
 			if combined > 32767 {
 				combined = 32767
 			} else if combined < -32768 {
